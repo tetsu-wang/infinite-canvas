@@ -12,3 +12,11 @@ web/out
 *.log
 .env*
 !.env.example
+*.md
+!VERSION
+!CHANGELOG.md
+.DS_Store
+.vscode
+*.swp
+*.swo
+*~
