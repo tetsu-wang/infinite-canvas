@@ -100,6 +100,9 @@ func proxyAIRequestAsync(w http.ResponseWriter, r *http.Request, path string, ta
 }
 
 func processAsyncTask(taskID, userID, modelName string, body []byte, contentType, path string) {
+	// 为每个异步任务创建独立的 HTTP 客户端，避免连接池冲突
+	taskHTTPClient := &http.Client{Timeout: 180 * time.Second}
+
 	// 更新状态为处理中
 	if err := repository.UpdateAsyncTaskStatus(taskID, model.TaskStatusProcessing, 10); err != nil {
 		log.Printf("Failed to update task status: taskId=%s err=%v", taskID, err)
@@ -146,8 +149,8 @@ func processAsyncTask(taskID, userID, modelName string, body []byte, contentType
 	// 更新进度
 	_ = repository.UpdateAsyncTaskStatus(taskID, model.TaskStatusProcessing, 50)
 
-	// 发送请求
-	response, err := aiHTTPClient.Do(request)
+	// 发送请求（使用独立的客户端）
+	response, err := taskHTTPClient.Do(request)
 	if err != nil {
 		log.Printf("AI proxy request failed: url=%s err=%v", request.URL.String(), err)
 		_ = service.RefundUserCredits(userID, modelName, credits, path)
