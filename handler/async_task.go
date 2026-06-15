@@ -29,12 +29,14 @@ func GetAsyncTask(w http.ResponseWriter, r *http.Request, taskID string) {
 		return
 	}
 
-	// 优化：轮询时不返回完整的 result（可能很大），只返回状态和进度
-	// 前端通过 URL 参数 includeResult=true 请求完整结果
-	includeResult := r.URL.Query().Get("includeResult") == "true"
-	if !includeResult && task.Status != "completed" {
-		// 未完成的任务不需要返回 result
-		task.Result = ""
+	// 优化：轮询时不返回大字段（requestBody 和未完成的 result）
+	// 这两个字段可能包含 base64 图片数据，非常大
+	includeFullData := r.URL.Query().Get("full") == "true"
+	if !includeFullData {
+		task.RequestBody = "" // 不返回请求体
+		if task.Status != "completed" {
+			task.Result = "" // 未完成时不返回结果
+		}
 	}
 
 	OK(w, task)
