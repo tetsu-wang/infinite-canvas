@@ -29,5 +29,13 @@ func GetAsyncTask(w http.ResponseWriter, r *http.Request, taskID string) {
 		return
 	}
 
+	// 优化：轮询时不返回完整的 result（可能很大），只返回状态和进度
+	// 前端通过 URL 参数 includeResult=true 请求完整结果
+	includeResult := r.URL.Query().Get("includeResult") == "true"
+	if !includeResult && task.Status != "completed" {
+		// 未完成的任务不需要返回 result
+		task.Result = ""
+	}
+
 	OK(w, task)
 }

@@ -26,7 +26,7 @@ type AsyncTask struct {
 	TaskType    TaskType   `json:"taskType"`
 	ModelName   string     `json:"modelName"`
 	Status      TaskStatus `json:"status" gorm:"index"`
-	RequestBody string     `json:"requestBody" gorm:"type:text"`
+	RequestBody string     `json:"requestBody,omitempty" gorm:"type:text"`
 	Result      string     `json:"result,omitempty" gorm:"type:text"`
 	Error       string     `json:"error,omitempty"`
 	Progress    int        `json:"progress"` // 0-100

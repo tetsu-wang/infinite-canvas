@@ -200,8 +200,9 @@ function refreshRemoteUser(config: AiConfig) {
 }
 
 async function pollTaskResult(taskId: string, config: AiConfig): Promise<ImageApiResponse> {
-    const maxAttempts = 120; // 2分钟（每秒轮询一次）
-    const pollInterval = 1000; // 1秒
+    const maxAttempts = 180; // 3分钟
+    let pollInterval = 2000; // 从 2 秒开始
+    const maxPollInterval = 5000; // 最大 5 秒
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, pollInterval));
@@ -223,7 +224,10 @@ async function pollTaskResult(taskId: string, config: AiConfig): Promise<ImageAp
             throw new Error(task.error || "任务处理失败");
         }
 
-        // status 为 pending 或 processing，继续轮询
+        // 指数退避：逐渐增加轮询间隔
+        if (pollInterval < maxPollInterval) {
+            pollInterval = Math.min(pollInterval * 1.2, maxPollInterval);
+        }
     }
 
     throw new Error("任务处理超时，请稍后查看结果");
