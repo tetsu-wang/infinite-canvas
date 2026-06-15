@@ -110,7 +110,8 @@ func proxyAIRequestAsync(w http.ResponseWriter, r *http.Request, path string, ta
 
 func processAsyncTask(taskID, userID, modelName string, body []byte, contentType, path string) {
 	// 为每个异步任务创建独立的 HTTP 客户端，避免连接池冲突
-	taskHTTPClient := &http.Client{Timeout: 180 * time.Second}
+	// 异步模式下可以设置更长的超时时间（5 分钟），因为不受 Cloudflare 100 秒限制
+	taskHTTPClient := &http.Client{Timeout: 300 * time.Second}
 
 	// 更新状态为处理中
 	if err := repository.UpdateAsyncTaskStatus(taskID, model.TaskStatusProcessing, 10); err != nil {
