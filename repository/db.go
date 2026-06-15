@@ -63,6 +63,21 @@ func DB() (*gorm.DB, error) {
 		if dbErr != nil {
 			return
 		}
+
+		// 优化 SQLite 性能（WAL 模式允许读写并发）
+		if driver == "sqlite" {
+			sqlDB, err := db.DB()
+			if err == nil {
+				// WAL 模式允许多个读者和一个写者并发
+				_, _ = sqlDB.Exec("PRAGMA journal_mode=WAL;")
+				// 优化写性能
+				_, _ = sqlDB.Exec("PRAGMA synchronous=NORMAL;")
+				// 设置连接池
+				sqlDB.SetMaxOpenConns(1)
+				sqlDB.SetMaxIdleConns(1)
+			}
+		}
+
 		dbErr = db.AutoMigrate(
 			&model.User{},
 			&model.CreditLog{},
