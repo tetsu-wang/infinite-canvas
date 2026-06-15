@@ -256,8 +256,9 @@ export async function requestGeneration(config: AiConfig, prompt: string) {
         );
 
         // 异步模式：返回 taskId
-        if (response.data.taskId) {
-            const result = await pollTaskResult(response.data.taskId, config);
+        const taskId = response.data.data?.taskId || response.data.taskId;
+        if (taskId) {
+            const result = await pollTaskResult(taskId, config);
             const images = parseImagePayload(result);
             refreshRemoteUser(config);
             return images;
@@ -297,8 +298,9 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/edits"), formData, { headers: aiHeaders(config) });
 
         // 异步模式：返回 taskId
-        if (response.data.taskId) {
-            const result = await pollTaskResult(response.data.taskId, config);
+        const taskId = response.data.data?.taskId || response.data.taskId;
+        if (taskId) {
+            const result = await pollTaskResult(taskId, config);
             const images = parseImagePayload(result);
             refreshRemoteUser(config);
             return images;
