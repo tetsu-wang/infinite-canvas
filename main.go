@@ -16,5 +16,6 @@ func main() {
 		log.Fatal(err)
 	}
 	service.StartPromptSyncScheduler()
+	service.StartAsyncTaskCleanupScheduler()
 	log.Fatal(router.New().Run(":" + config.Cfg.Port))
 }
