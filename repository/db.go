@@ -69,6 +69,7 @@ func DB() (*gorm.DB, error) {
 			&model.Prompt{},
 			&model.Asset{},
 			&model.Setting{},
+			&model.AsyncTask{},
 		)
 	})
 	return db, dbErr
