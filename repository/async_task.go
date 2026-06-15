@@ -5,7 +5,6 @@ import (
 
 	"github.com/basketikun/infinite-canvas/model"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // CreateAsyncTask 创建异步任务。
@@ -68,7 +67,7 @@ func UpdateAsyncTaskResult(id string, result string) error {
 		return err
 	}
 
-	return db.Model(&model.AsyncTask).Where("id = ?", id).Updates(map[string]interface{}{
+	return db.Model(&model.AsyncTask{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"status":     model.TaskStatusCompleted,
 		"result":     result,
 		"progress":   100,
