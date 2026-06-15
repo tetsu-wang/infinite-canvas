@@ -10,16 +10,21 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/basketikun/infinite-canvas/model"
+	"github.com/basketikun/infinite-canvas/repository"
 	"github.com/basketikun/infinite-canvas/service"
 )
 
+var aiHTTPClient = &http.Client{Timeout: 180 * time.Second}
+
 func AIImagesGenerations(w http.ResponseWriter, r *http.Request) {
-	proxyAIRequest(w, r, "/images/generations")
+	proxyAIRequestAsync(w, r, "/images/generations", model.TaskTypeImageGeneration)
 }
 
 func AIImagesEdits(w http.ResponseWriter, r *http.Request) {
-	proxyAIRequest(w, r, "/images/edits")
+	proxyAIRequestAsync(w, r, "/images/edits", model.TaskTypeImageEdit)
 }
 
 func AIChatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +66,118 @@ func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
 	}
 	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
 	copyAIResponse(w, request, nil)
+}
+
+func proxyAIRequestAsync(w http.ResponseWriter, r *http.Request, path string, taskType model.TaskType) {
+	body, contentType, modelName, err := readAIRequest(r)
+	if err != nil {
+		log.Printf("AI proxy request read failed: %v", err)
+		Fail(w, "AI 接口请求失败")
+		return
+	}
+	user, ok := service.UserFromContext(r.Context())
+	if !ok {
+		Fail(w, "未登录或权限不足")
+		return
+	}
+
+	// 创建异步任务
+	task, err := repository.CreateAsyncTask(user.ID, taskType, modelName, string(body))
+	if err != nil {
+		log.Printf("Failed to create async task: %v", err)
+		Fail(w, "创建任务失败")
+		return
+	}
+
+	// 立即返回任务 ID
+	OK(w, map[string]interface{}{
+		"taskId": task.ID,
+		"status": task.Status,
+	})
+
+	// 启动后台处理
+	go processAsyncTask(task.ID, user.ID, modelName, body, contentType, path)
+}
+
+func processAsyncTask(taskID, userID, modelName string, body []byte, contentType, path string) {
+	// 更新状态为处理中
+	if err := repository.UpdateAsyncTaskStatus(taskID, model.TaskStatusProcessing, 10); err != nil {
+		log.Printf("Failed to update task status: taskId=%s err=%v", taskID, err)
+		return
+	}
+
+	// 计算积分
+	credits, err := service.ModelCost(modelName)
+	if err != nil {
+		log.Printf("AI proxy read model cost failed: model=%s err=%v", modelName, err)
+		_ = repository.UpdateAsyncTaskError(taskID, "模型费用计算失败")
+		return
+	}
+	credits *= readAIRequestCount(body, contentType)
+
+	// 选择渠道
+	channel, err := service.SelectModelChannel(modelName)
+	if err != nil {
+		log.Printf("AI proxy select channel failed: model=%s err=%v", modelName, err)
+		_ = repository.UpdateAsyncTaskError(taskID, "模型渠道选择失败")
+		return
+	}
+
+	// 构建请求
+	path = resolveAIProxyPath(channel.BaseURL, modelName, path)
+	request, err := http.NewRequest(http.MethodPost, service.BuildModelChannelURL(channel, path), bytes.NewReader(body))
+	if err != nil {
+		log.Printf("AI proxy build request failed: url=%s err=%v", service.BuildModelChannelURL(channel, path), err)
+		_ = repository.UpdateAsyncTaskError(taskID, "构建请求失败")
+		return
+	}
+	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+	if contentType != "" {
+		request.Header.Set("Content-Type", contentType)
+	}
+
+	// 扣除积分
+	if err := service.ConsumeUserCredits(userID, modelName, credits, path); err != nil {
+		log.Printf("Failed to consume credits: user=%s model=%s credits=%d err=%v", userID, modelName, credits, err)
+		_ = repository.UpdateAsyncTaskError(taskID, err.Error())
+		return
+	}
+
+	// 更新进度
+	_ = repository.UpdateAsyncTaskStatus(taskID, model.TaskStatusProcessing, 50)
+
+	// 发送请求
+	response, err := aiHTTPClient.Do(request)
+	if err != nil {
+		log.Printf("AI proxy request failed: url=%s err=%v", request.URL.String(), err)
+		_ = service.RefundUserCredits(userID, modelName, credits, path)
+		_ = repository.UpdateAsyncTaskError(taskID, "AI 接口请求失败")
+		return
+	}
+	defer response.Body.Close()
+
+	// 检查响应状态
+	if response.StatusCode >= http.StatusBadRequest {
+		bodyBytes, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		log.Printf("AI upstream error: url=%s status=%d", request.URL.String(), response.StatusCode)
+		_ = service.RefundUserCredits(userID, modelName, credits, path)
+		_ = repository.UpdateAsyncTaskError(taskID, aiUpstreamStatusMessage(response.StatusCode, bodyBytes))
+		return
+	}
+
+	// 读取响应
+	result, err := io.ReadAll(response.Body)
+	if err != nil {
+		log.Printf("Failed to read response: %v", err)
+		_ = service.RefundUserCredits(userID, modelName, credits, path)
+		_ = repository.UpdateAsyncTaskError(taskID, "读取响应失败")
+		return
+	}
+
+	// 保存结果
+	if err := repository.UpdateAsyncTaskResult(taskID, string(result)); err != nil {
+		log.Printf("Failed to update task result: taskId=%s err=%v", taskID, err)
+	}
 }
 
 func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
@@ -111,7 +228,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 }
 
 func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func()) {
-	response, err := http.DefaultClient.Do(request)
+	response, err := aiHTTPClient.Do(request)
 	if err != nil {
 		log.Printf("AI proxy request failed: url=%s err=%v", request.URL.String(), err)
 		if onFailure != nil {
