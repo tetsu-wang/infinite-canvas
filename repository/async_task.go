@@ -9,6 +9,11 @@ import (
 
 // CreateAsyncTask 创建异步任务。
 func CreateAsyncTask(userID string, taskType model.TaskType, modelName string, requestBody string) (*model.AsyncTask, error) {
+	return CreateAsyncTaskWithID(uuid.NewString(), userID, taskType, modelName, requestBody)
+}
+
+// CreateAsyncTaskWithID 创建异步任务（指定 ID）。
+func CreateAsyncTaskWithID(id, userID string, taskType model.TaskType, modelName string, requestBody string) (*model.AsyncTask, error) {
 	db, err := DB()
 	if err != nil {
 		return nil, err
@@ -16,7 +21,7 @@ func CreateAsyncTask(userID string, taskType model.TaskType, modelName string, r
 
 	now := time.Now().Format(time.RFC3339)
 	task := &model.AsyncTask{
-		ID:          uuid.NewString(),
+		ID:          id,
 		UserID:      userID,
 		TaskType:    taskType,
 		ModelName:   modelName,

@@ -15,6 +15,7 @@ import (
 	"github.com/basketikun/infinite-canvas/model"
 	"github.com/basketikun/infinite-canvas/repository"
 	"github.com/basketikun/infinite-canvas/service"
+	"github.com/google/uuid"
 )
 
 var aiHTTPClient = &http.Client{Timeout: 180 * time.Second}
@@ -81,18 +82,13 @@ func proxyAIRequestAsync(w http.ResponseWriter, r *http.Request, path string, ta
 		return
 	}
 
-	// 创建异步任务
-	task, err := repository.CreateAsyncTask(user.ID, taskType, modelName, string(body))
-	if err != nil {
-		log.Printf("Failed to create async task: %v", err)
-		Fail(w, "创建任务失败")
-		return
-	}
+	// 生成任务 ID
+	taskID := uuid.NewString()
 
-	// 立即返回任务 ID
+	// 立即返回任务 ID（不等待数据库写入）
 	OK(w, map[string]interface{}{
-		"taskId": task.ID,
-		"status": task.Status,
+		"taskId": taskID,
+		"status": "pending",
 	})
 
 	// 确保响应已发送（刷新缓冲区）
@@ -104,8 +100,20 @@ func proxyAIRequestAsync(w http.ResponseWriter, r *http.Request, path string, ta
 	bodyCopy := make([]byte, len(body))
 	copy(bodyCopy, body)
 
-	// 启动后台处理
-	go processAsyncTask(task.ID, user.ID, modelName, bodyCopy, contentType, path)
+	// 启动后台处理（包括创建数据库记录）
+	go processAsyncTaskWithCreate(taskID, user.ID, taskType, modelName, bodyCopy, contentType, path)
+}
+
+func processAsyncTaskWithCreate(taskID, userID string, taskType model.TaskType, modelName string, body []byte, contentType, path string) {
+	// 先创建任务记录（使用预生成的 taskID）
+	_, err := repository.CreateAsyncTaskWithID(taskID, userID, taskType, modelName, string(body))
+	if err != nil {
+		log.Printf("Failed to create async task in goroutine: taskId=%s err=%v", taskID, err)
+		return
+	}
+
+	// 然后调用原有的处理逻辑
+	processAsyncTask(taskID, userID, modelName, body, contentType, path)
 }
 
 func processAsyncTask(taskID, userID, modelName string, body []byte, contentType, path string) {
