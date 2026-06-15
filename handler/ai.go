@@ -95,8 +95,17 @@ func proxyAIRequestAsync(w http.ResponseWriter, r *http.Request, path string, ta
 		"status": task.Status,
 	})
 
+	// 确保响应已发送（刷新缓冲区）
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+
+	// 复制必要的数据，避免在 goroutine 中引用请求上下文
+	bodyCopy := make([]byte, len(body))
+	copy(bodyCopy, body)
+
 	// 启动后台处理
-	go processAsyncTask(task.ID, user.ID, modelName, body, contentType, path)
+	go processAsyncTask(task.ID, user.ID, modelName, bodyCopy, contentType, path)
 }
 
 func processAsyncTask(taskID, userID, modelName string, body []byte, contentType, path string) {
