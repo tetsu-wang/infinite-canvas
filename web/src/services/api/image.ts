@@ -206,11 +206,11 @@ async function pollTaskResult(taskId: string, config: AiConfig): Promise<ImageAp
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
-        const response = await axios.get<AsyncTaskResponse>(aiApiUrl(config, `/tasks/${taskId}`), {
+        const response = await axios.get<{ code: number; data: AsyncTaskResponse; msg: string }>(aiApiUrl(config, `/tasks/${taskId}`), {
             headers: aiHeaders(config),
         });
 
-        const task = response.data;
+        const task = response.data.data;
 
         if (task.status === "completed") {
             if (!task.result) {
