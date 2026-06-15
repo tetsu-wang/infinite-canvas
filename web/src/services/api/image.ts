@@ -18,6 +18,16 @@ type ImageApiResponse = {
     error?: { message?: string };
     code?: number;
     msg?: string;
+    taskId?: string;
+    status?: string;
+};
+
+type AsyncTaskResponse = {
+    id: string;
+    status: "pending" | "processing" | "completed" | "failed";
+    progress: number;
+    result?: string;
+    error?: string;
 };
 
 const QUALITY_BASE: Record<string, number> = {
@@ -189,6 +199,36 @@ function refreshRemoteUser(config: AiConfig) {
     if (config.channelMode === "remote") void useUserStore.getState().hydrateUser();
 }
 
+async function pollTaskResult(taskId: string, config: AiConfig): Promise<ImageApiResponse> {
+    const maxAttempts = 120; // 2分钟（每秒轮询一次）
+    const pollInterval = 1000; // 1秒
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
+        const response = await axios.get<AsyncTaskResponse>(aiApiUrl(config, `/tasks/${taskId}`), {
+            headers: aiHeaders(config),
+        });
+
+        const task = response.data;
+
+        if (task.status === "completed") {
+            if (!task.result) {
+                throw new Error("任务完成但没有返回结果");
+            }
+            return JSON.parse(task.result) as ImageApiResponse;
+        }
+
+        if (task.status === "failed") {
+            throw new Error(task.error || "任务处理失败");
+        }
+
+        // status 为 pending 或 processing，继续轮询
+    }
+
+    throw new Error("任务处理超时，请稍后查看结果");
+}
+
 function withSystemMessage(config: AiConfig, messages: ChatCompletionMessage[]) {
     const systemPrompt = config.systemPrompt.trim();
     return systemPrompt ? [{ role: "system" as const, content: systemPrompt }, ...messages] : messages;
@@ -214,6 +254,16 @@ export async function requestGeneration(config: AiConfig, prompt: string) {
                 headers: aiHeaders(config, "application/json"),
             },
         );
+
+        // 异步模式：返回 taskId
+        if (response.data.taskId) {
+            const result = await pollTaskResult(response.data.taskId, config);
+            const images = parseImagePayload(result);
+            refreshRemoteUser(config);
+            return images;
+        }
+
+        // 同步模式（兼容旧版本或本地模式）
         const images = parseImagePayload(response.data);
         refreshRemoteUser(config);
         return images;
@@ -245,6 +295,16 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 
     try {
         const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/edits"), formData, { headers: aiHeaders(config) });
+
+        // 异步模式：返回 taskId
+        if (response.data.taskId) {
+            const result = await pollTaskResult(response.data.taskId, config);
+            const images = parseImagePayload(result);
+            refreshRemoteUser(config);
+            return images;
+        }
+
+        // 同步模式（兼容旧版本或本地模式）
         const images = parseImagePayload(response.data);
         refreshRemoteUser(config);
         return images;
